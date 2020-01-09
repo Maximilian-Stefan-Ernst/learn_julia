@@ -1,6 +1,6 @@
-using JuMP, Pkg, Clp, Cbc, GLPK, Queryverse, RCall
+using JuMP, Pkg, Clp, Cbc, GLPK, Queryverse, RCall, ParameterJuMP
 
-model = Model()
+model = ModelWithParams()
 
 
 @variable(model, x)
@@ -8,24 +8,35 @@ model = Model()
 @objective(model, Min, x)
 
 #################
-m = Model(with_optimizer(GLPK.Optimizer))
+optimizer = Juniper.Optimizer
+params = Dict{Symbol,Any}()
+params[:nl_solver] = with_optimizer(Ipopt.Optimizer, print_level=0)
 
-@variable(m, 0 <= x <= 2 )
-@variable(m, 0 <= y <= 30 )
+using LinearAlgebra # for the dot product
+m = Model(with_optimizer(optimizer, params))
+####
 
-@objective(m, Max, 5x + 3*y )
+#a = add_parameter(m,2)
+a = 5
 
-@constraint(m, 1x + 5y <= 3.0 )
+@variable(m, -2 <= x <= 2, Int)
+
+@variable(m, -1 <= z <= 1, Int)
+
+@constraint(m, constraint1, x*z <= 0)
+
+@objective(m, Max, a*z)
 
 JuMP.optimize!(m)
 println("Objective value: ", JuMP.objective_value(m))
 println("x = ", JuMP.value(x))
-println("y = ", JuMP.value(y))
+println("z = ", JuMP.value(z))
 
 
 ###############
 df = DataFrame(load("breastcancer_processed.csv"))
 
+using RCall
 
 R"""pacman::p_load(tidyverse, magrittr)
     dfr <- read_csv("breastcancer_processed.csv")
@@ -53,4 +64,84 @@ I = lm[:coefficients][1]
 
 sum(broadcast(^, (I .+ Λ.*x.ClumpThickness) .- y,2))
 
-sum(broadcast(^, lm[:residuals],2))
+sum(broadcast(^, lm[:residuals], 2))
+
+
+
+###########################################
+
+lmj = Model(with_optimizer(optimizer, params))
+
+@variable(lmj, λ)
+@variable(lmj, I)
+
+@variable(lmj, X[1:683])
+@constraint(lmj, X .== x.ClumpThickness)
+
+@variable(lmj, Y[1:683])
+@constraint(lmj, Y .== y)
+
+@objective(lmj, Min,
+    sum((I + λ*x.ClumpThickness[i] - y[i])^2 for i in 1:683) + 10*λ)
+
+objective_function(lmj)
+
+JuMP.optimize!(lmj)
+println("Objective value: ", JuMP.objective_value(lmj))
+println("I = ", JuMP.value(I))
+println("lamb = ", JuMP.value(λ))
+
+
+#####################
+
+lmj = Model(with_optimizer(Clp.Optimizer))
+
+@variable(lmj, λ)
+@variable(lmj, I)
+@variable(lmj, t)
+@constraint(lmj, t ==  I^2)
+
+#@variable(lmj, X[1:683])
+#@constraint(lmj, X .== x.ClumpThickness)
+
+#@variable(lmj, Y[1:683])
+#@constraint(lmj, Y .== y)
+
+@objective(lmj, Min, t)
+
+JuMP.optimize!(lmj)
+println("Objective value: ", JuMP.objective_value(lmj))
+println("I = ", JuMP.value(I))
+println("lamb = ", JuMP.value(λ))
+
+Xt = 3,6,10
+Yt = 6,12,20
+
+
+
+#####################################
+yt = -1
+xt = 1
+
+
+lmj = Model(with_optimizer(GLPK.Optimizer))
+
+@variable(lmj, -1 <= λ <= 1, Int)
+@variable(lmj, yt == -1)
+#@variable(lmj, I)
+
+@variable(lmj, z)
+#@constraint(lmj, z == sign2(-1,λ))
+
+#@variable(lmj, X[1:683])
+#@constraint(lmj, X .== x.ClumpThickness)
+
+#@variable(lmj, Y[1:683])
+#@constraint(lmj, Y .== y)
+
+@objective(lmj, Min, yt*λ)
+
+JuMP.optimize!(lmj)
+println("Objective value: ", JuMP.objective_value(lmj))
+println("i = ", JuMP.value(i))
+println("lamb = ", JuMP.value(λ))
