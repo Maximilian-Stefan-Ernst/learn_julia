@@ -1,5 +1,5 @@
 using RCall, Optim, LinearAlgebra, ForwardDiff, Random, NLSolversBase,
-      Distributions, BenchmarkTools
+      Distributions, BenchmarkTools, DataFrames
 
 # get Data from R
 R"""
@@ -56,7 +56,7 @@ end
 
 function logl(obs_means, exp_cov, data_matr)
       exp_cov = Matrix(Hermitian(exp_cov))
-      likelihood::Float64 = -loglikelihood(MvNormal(obs_means, exp_cov), transpose(data_matr))
+      likelihood = -loglikelihood(MvNormal(obs_means, exp_cov), transpose(data_matr))
       return likelihood
 end
 
@@ -125,7 +125,11 @@ function delta_method(fit)
       else
             error("Your Optimizer is not supported")
       end
-      return se
+      z = parameters./se
+      p = pdf(Normal(), z)
+      return DataFrame(se = se,
+                        z = z,
+                        p = p)
 end
 
 
@@ -148,6 +152,10 @@ function fit_in_tree(model, data, start, est = ML, optim = "LBFGS")
 end
 
 
+
+
+###########################################################
+x0 = append!([0.5, 0.5, 0.5, 0.5], ones(2))
 
 @time fit_in_tree(ram, dat, x0, ML, "LBFGS")
 
