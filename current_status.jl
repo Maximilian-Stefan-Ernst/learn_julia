@@ -1,5 +1,5 @@
 using RCall, Optim, LinearAlgebra, ForwardDiff, Random, NLSolversBase,
-      Distributions
+      Distributions, BenchmarkTools
 
 # fit SEM Model with lavaan
 R"""
@@ -85,7 +85,7 @@ function logl(x)
             0 0 0 0]
 
       Cov_Exp =  Matrix(Hermitian(F*inv(I-A)*S*transpose(inv(I-A))*transpose(F)))
-      logl = loglikelihood(MvNormal(mean_jl, Cov_Exp), transpose(dat_matr))
+      logl = -loglikelihood(MvNormal(mean_jl, Cov_Exp), transpose(dat_matr))
       return logl
 end
 
@@ -140,37 +140,42 @@ logl(parameters_2)
 
 R"""fitMeasures(fit, "logl")"""
 
-@rput model_impl_cov_2
-@rput mean_jl
-
-R"emdbook::dmvnorm(dat %>% as.matrix(),
-        mean_jl,
-        model_impl_cov_2,
-        log = TRUE
-) %>% sum()"
+# @rput model_impl_cov_2
+# @rput mean_jl
+#
+# R"emdbook::dmvnorm(dat %>% as.matrix(),
+#         mean_jl,
+#         model_impl_cov_2,
+#         log = TRUE
+# ) %>% sum()"
 
 # optimize over logl instead of F-Value - gives an Error!
-# result_dif = optimize(logl, x0, LBFGS(), autodiff = :forward)
+result_dif_1_logl = optimize(logl, x0, LBFGS(), autodiff = :forward)
 #
-# func = TwiceDifferentiable(x -> logl(x),
-#                            append!([0.5, 0.5, 0.5, 0.5],
-#                            ones(2)),
-#                            autodiff=:forward)
-#
-# result_dif = optimize(func, x0)
+func_logl = TwiceDifferentiable(x -> logl(x),
+                           append!([0.5, 0.5, 0.5, 0.5],
+                           ones(2)),
+                           autodiff=:forward)
 
+result_dif_2_logl = optimize(func_logl, x0)
 
-# first version throws an error, second version works
-se = sqrt.(2*diag(inv(hessian!(func, parameters_2))))
+parameters_1_logl = Optim.minimizer(result_dif_1_logl)
+parameters_2_logl = Optim.minimizer(result_dif_2_logl)
 
-se = sqrt.(2*diag(inv(ForwardDiff.hessian(logl, parameters_2))))
+# compare to lavaan
+[lavaan_est parameters_1 parameters_1_logl parameters_2 parameters_2_logl]
+
+# compute standard errors
+se_2 = sqrt.(diag(inv(hessian!(func, parameters_2))))
+
+se_1 = sqrt.(diag(inv(ForwardDiff.hessian(logl, parameters_2))))
 
 # lavaan standard errors are almost the same
 lavaan_se = append!(par_jl.se[4:7], par_jl.se[2:3])
-[lavaan_se se]
+[lavaan_se se_1 se_2]
 
 # p values
-z_stats = parameters./se
+z_stats = parameters_1./se_1
 #pdf(TDist(300), z_stats)
 
 lavaan_p = append!(est_jl.pvalue[4:7], est_jl.pvalue[2:3])
@@ -182,7 +187,7 @@ lavaan_z = append!(est_jl.z[4:7], est_jl.z[2:3])
 # compare z values - almost the same
 [lavaan_z z_stats]
 
-# this was lavaan computes standard errors
+# this was lavaan computes p-values
 @rput lavaan_z
 r_p = rcopy(R"2*pnorm(-abs(lavaan_z))")
 [r_p lavaan_p]
@@ -192,8 +197,9 @@ p_values = pdf(Normal(), z_stats)
 
 [lavaan_p p_values]
 
+# let r compute p values from our solution
 @rput z_stats
 r_p_our_sol = rcopy(R"2*pnorm(-abs(z_stats))")
 
-# why does R compute different p-values?
+# why does R compute different p-values? Normal?
 [r_p_our_sol p_values]
